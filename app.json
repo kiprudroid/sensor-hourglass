@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Sensor Hourglass",
+    "slug": "sensor-hourglass",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0F1611",
+    "scheme": "sensorhourglass",
+    "splash": {
+      "backgroundColor": "#0F1611",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.example.sensorhourglass",
+      "infoPlist": {
+        "NSMotionUsageDescription": "Motion data makes the sand respond when you tilt, shake or flip your phone."
+      }
+    },
+    "android": {
+      "package": "com.example.sensorhourglass",
+      "adaptiveIcon": {
+        "backgroundColor": "#0F1611"
+      }
+    },
+    "plugins": ["expo-screen-orientation"],
+    "experiments": {
+      "typedRoutes": false,
+      "reactCompiler": false
+    }
+  }
+}
