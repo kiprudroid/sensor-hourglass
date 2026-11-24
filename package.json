@@ -13,7 +13,8 @@
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "doctor": "expo-doctor",
-    "bench": "bun run src/sim/benchmark.ts"
+    "bench": "bun run src/sim/benchmark.ts",
+    "postinstall": "bun scripts/patch-three.js"
   },
   "dependencies": {
     "@expo-google-fonts/ibm-plex-mono": "0.4.2",
