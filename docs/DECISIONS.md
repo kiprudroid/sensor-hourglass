@@ -3,8 +3,28 @@
 ## Environment & scope
 
 - **Date**: 2026-11-24
-- **Stack**: Expo SDK 58.0.26, React Native 0.88.1, React 19.3.0, Three 0.187.0, `@react-three/fiber` 9.8.2, `expo-gl` 58.0.4, Bun 1.4.4.
+- **Stack**: Expo SDK 58.0.26, React Native 0.88.1, React 19.3.0, Three 0.187.0, `@react-three/fiber/native` 9.8.2, `expo-gl` 58.0.4, Bun 1.4.4.
 - **No WASM**: Simulation is pure TypeScript typed arrays.
+
+## Heightfield redesign (2026-11-24)
+
+User feedback after initial mobile run: ~1 FPS, very resource intensive, gravity/sensor feel weak, and individual grains visible instead of sand. The original PBD grain solver + instanced-sphere rendering was too expensive for Expo Go/mobile and did not read as sand.
+
+### New approach
+
+- **Simulation**: 32x32 heightfield per bulb (`src/sim/heightfield.ts`). Each cell stores sand volume/height. Horizontal slosh is driven by gravity projected into the device/glass x,z plane; surface gradients create a shallow-water-like restoring force. A simple damped velocity field advects volume between neighboring cells. This gives tilt/slosh response from real `g_eff` without simulating individual grains.
+- **Neck flow**: volume transfers from the upstream bulb to the downstream bulb at `Q = Q0 * factor`, where `Q0 = totalVolume / duration`. In physical mode, transfer is gated by gravity direction/magnitude; in strict mode, it is forced.
+- **Rendering**: two deformed mesh surfaces (one per bulb), updated in `useFrame` by mutating plane geometry vertices. No per-grain instances, no particle system, no postprocessing. Glass is a lathe with cheap physical-style material; frame is simple primitives.
+- **Sensor emphasis**: `g_eff = -(accelerationIncludingGravity)`, low-pass filtered in `src/sensors/gravity.ts`, fed every frame to the heightfield step. Slosh acceleration uses projected gravity so tilting the device moves the sand surface.
+- **Performance**: fixed small grid (1024 cells/bulb), typed arrays, no allocations in the steady-state step, one mesh per bulb. Intended to be smooth on mid-range phones; **not yet measured on-device in this environment**.
+
+### Tradeoffs / deviations
+
+- **Not the spec PBD granular solver**. No per-grain contacts, no Coulomb grain-grain friction, no repose angle emergence from grains, no capture-region grain selection. Sand behavior is an efficient approximation inspired by heightfield/shallow-water/liquid surface techniques (similar in spirit to how simple beverage-slosh apps avoid particle fluids).
+- **No R1 depth-imposter surface**. The redesign uses mesh surfaces for speed/simplicity.
+- **Acceptance criteria not fully met**. The old sim tests that asserted grain-level behavior were replaced with heightfield invariant tests (conservation, drain direction, tilt reduces flow, flip reverses upstream, strict mode). The full spec acceptance suite (exact drain/repose/flip/shake/sleep tolerances, 10-min soak, background resume rebuild) is not verified.
+- **Visual fidelity**: sand reads as a smooth volume/surface, not individual grains. This matches the user's request but is a stylized approximation.
+- **Background/resume fast-forward**: not fully implemented.
 
 ## Milestone 1 - Scaffold
 
@@ -12,47 +32,27 @@
 - Portrait locked via `expo-screen-orientation`. Background/splash clear color `#0F1611`.
 - Fonts: Pixelify Sans (UI) and IBM Plex Mono (numerals/hex). Splash held until fonts load.
 
-## Milestone 2 - Feasibility spike (recorded as static/dev estimate)
+## Sensor mapping
 
-- **Not run on physical devices in this CI-less workspace**. I could not verify Expo Go on real Android/iOS hardware here.
-- Selected conservative starting tiers based on typical R3F/expo-gl mobile budgets:
-  - High: 4000 grains, R2 instanced spheres, render scale 1, refraction off (cheap fake not implemented), blur 0.
-  - Medium: 2500 grains, R2, render scale 0.75.
-  - Low: 1500 grains, R2/R3, render scale 0.6.
-- **Rendering rung shipped: R2/R3-style instanced sphere sprites** (MeshStandardMaterial instanced spheres with analytic normals). Full R1 depth-imposter+bilateral blur surface was not implemented due environment/time; the code structure keeps rendering behind `src/scene/*` so R1 can replace SandPoints.
-- Sensor axis mapping is implemented as `g_eff = -(accelerationIncludingGravity)` in Expo device coordinates (x right, y up, z out of screen). This is the expected Expo DeviceMotion convention; **must be empirically verified on-device** with the debug overlay (flat face-up, upright, upside down) and updated in `src/sensors/gravity.ts`.
+- Expo DeviceMotion `accelerationIncludingGravity` (m/s²), mapped by negation to `g_eff` in device frame.
+- Platform-specific empirical verification is required on-device with the debug/visual behavior: flat face-up, upright portrait, upside down, tilt. Adjust sign/convention in `src/sensors/gravity.ts` if needed.
 
-## Physics model
+## Runtime fixes
 
-- PBD-style granular solver with spatial hash, grain-grain Coulomb friction (`mu=tan(34°)`), glass friction, restitution 0.04, sleeping, and glass interior collision against an axisymmetric radius-vs-height profile table.
-- Grain size is derived from selected tier count and fixed sand volume (55% of one bulb at packing fraction 0.6).
-- Flux controller meters neck transfer at `Q = Q0 * sqrt(gn/g0)` in physical mode; strict mode forces `Q0` regardless of orientation.
-- **Deviation**: capture selection falls back to the lowest upstream grain when no grain is in the narrow capture band. This keeps flow functioning with the coarse JS solver but relaxes the literal "only grains physically present in the capture region" constraint. Documented as a solver-feeding approximation.
-- Stream is modeled as in-flight bulb=2 grains with impact reintroduction; visual stream thread is simplified in scene (not a full tapered ribbon with dust).
-- Background fast-forward rebuild is not fully implemented; snapshot/settings persistence is implemented.
-
-## Timing
-
-- Remaining time is `upstream grains / Q0` (physical) or same counter in strict mode with forced Q.
-- Supported duration UI presets 30s-25m; custom input clamps to 10s-24h.
-
-## Look & performance
-
-- Background and clear color are exactly `#0F1611`.
-- Sand color is user-defined, no hardcoded sand render constant; presets live in `src/theme/sandPresets.ts`.
-- Instanced mesh rendering, no postprocessing libraries, no heavy drei helpers.
-- No runtime shadow maps on shipped tiers.
+- **Hermes startup crash**: `three.cjs` called `process.emitWarning`, unavailable on Hermes, causing `[runtime not ready]: TypeError: undefined is not a function`. Fixed by guarding the call and adding `scripts/patch-three.js` as `postinstall`.
+- **Babel config**: removed manual `react-native-reanimated/plugin`; `babel-preset-expo` handles Reanimated/Worklets for SDK 58.
 
 ## Tests / verification
 
-- `bun test src/sim/sim.test.ts` passes in this environment. Tests cover conservation, repose sanity, drain transfer, tilt near-zero flow, flip upstream reversal, shake containment, strict-mode flow, replay determinism.
-- **Not verified here**: Expo Go on real Android/iOS, actual fps/ms-per-step on target devices, depth-imposter R1, haptic quality, thermal 10-min soak, background resume visual rebuild.
+- Automated: `bun test src/sim/sim.test.ts` passes (5 tests: conservation, upright drain, horizontal tilt low flow, flip upstream reversal, strict mode flow).
+- `bun run typecheck` and `bun run lint` pass.
+- **Not verified in this workspace**: real-device Expo Go Android/iOS, actual FPS/smoothness, sensor axis empirical check, haptic quality, thermal/10-min soak, background resume, visual quality.
 
-## Known gaps / deviations
+## Known gaps
 
-- R1 depth-imposter + bilateral blur surface not shipped; R2/R3 instanced spheres shipped.
-- Stream ribbon/dust visual is simplified.
-- Full acceptance suite from spec (exact 2% drain, 34°±4° repose, sqrt(cos45)±5%, 40% flip reversal±3%, 90% sleep in 3s, strict wall-clock exact) is not fully met by this simplified JS solver; core invariants are tested.
-- Quality governor and startup micro-benchmark are minimal/not fully adaptive.
-- Sensor recorder/replay tooling exists at module level; no in-app debug UI.
-- Background resume fast-forward/rebuild is partial.
+- R1 depth-imposter + bilateral blur not implemented.
+- Full spec granular acceptance tolerances not met; heightfield is an approximation.
+- Quality governor/startup micro-benchmark minimal.
+- Sensor recorder/replay has module-level code; no in-app debug UI.
+- Stream ribbon/dust visual not implemented.
+- Old grain/solver files remain in `src/sim/` but are not on the active path.
