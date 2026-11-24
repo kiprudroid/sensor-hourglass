@@ -37,8 +37,6 @@ export function clampDuration(seconds: number): number {
   return Math.min(MAX_DURATION_SECONDS, Math.max(MIN_DURATION_SECONDS, seconds));
 }
 
-const TOTAL_VOLUME = 1000; // abstract volume units
-
 export function createHourglassSim(initial: {
   tier?: QualityTier;
   durationSeconds?: number;
@@ -50,7 +48,8 @@ export function createHourglassSim(initial: {
   const durationSeconds = clampDuration(initial.durationSeconds ?? 60);
   const seed = initial.seed ?? 1;
   const hf = createHeightfield(32);
-  fillUpper(hf, TOTAL_VOLUME);
+  fillUpper(hf, 1);
+  const TOTAL_VOLUME = hf.totalUpper(); // actual filled volume in cell-height units
 
   const config: SimConfig = {
     tier,

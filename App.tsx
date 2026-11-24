@@ -7,6 +7,7 @@ import {
   Pressable,
   Modal,
   TextInput,
+  PanResponder,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -62,6 +63,7 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [remaining, setRemaining] = useState(DEFAULT_SETTINGS.durationSeconds);
   const [sensorOk, setSensorOk] = useState(true);
+  const sensorOkRef = useRef(true);
   const [debugGravity, setDebugGravity] = useState({ x: 0, y: -9.80665, z: 0 });
   const simRef = useRef(
     createHourglassSim({
@@ -82,6 +84,9 @@ export default function App() {
   useEffect(() => {
     runningRef.current = running;
   }, [running]);
+  useEffect(() => {
+    sensorOkRef.current = sensorOk;
+  }, [sensorOk]);
 
   useEffect(() => {
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(
@@ -109,14 +114,25 @@ export default function App() {
   useEffect(() => {
     let sub: { remove: () => void } | null = null;
     let mounted = true;
+    let gotData = false;
+    const timeout = setTimeout(() => {
+      if (mounted && !gotData) setSensorOk(false);
+    }, 2500);
     (async () => {
       try {
+        if (typeof (DeviceMotion as any).requestPermissionsAsync === 'function') {
+          await (DeviceMotion as any).requestPermissionsAsync();
+        }
         const available = await DeviceMotion.isAvailableAsync();
         if (!mounted) return;
-        setSensorOk(available);
-        if (!available) return;
+        if (!available) {
+          setSensorOk(false);
+          return;
+        }
+        setSensorOk(true);
         DeviceMotion.setUpdateInterval(16);
         sub = DeviceMotion.addListener((data) => {
+          gotData = true;
           const g = gravityRef.current.update(
             data.accelerationIncludingGravity,
             1 / 60,
@@ -154,6 +170,7 @@ export default function App() {
     })();
     return () => {
       mounted = false;
+      clearTimeout(timeout);
       sub?.remove();
     };
   }, []);
@@ -199,10 +216,24 @@ export default function App() {
 
   const onVirtualFlip = useCallback(() => {
     virtualRef.current.triggerFlip();
-    if (sensorOk) {
-      // Also apply to sim by inverting virtual gravity impulse conceptually: toggle running not needed.
-    }
-  }, [sensorOk]);
+  }, []);
+
+  // eslint-disable-next-line react-hooks/refs -- callbacks read refs at event time, not during render
+  const [panResponder] = useState(() =>
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => !sensorOkRef.current,
+      onMoveShouldSetPanResponder: (_, g) =>
+        !sensorOkRef.current && (Math.abs(g.dx) > 5 || Math.abs(g.dy) > 5),
+      onPanResponderMove: (_, g) => {
+        const x = Math.max(-1, Math.min(1, g.dx / 140));
+        const y = Math.max(-1, Math.min(1, -1 - g.dy / 140));
+        virtualRef.current.setTilt(x, y);
+      },
+      onPanResponderRelease: () => {
+        virtualRef.current.setTilt(0, -1);
+      },
+    }),
+  );
 
   const updateSettings = useCallback((patch: Partial<Settings>) => {
     setSettings((prev) => {
@@ -228,13 +259,15 @@ export default function App() {
       <SafeAreaProvider>
         <View style={styles.root}>
           <StatusBar style="light" />
-          <HourglassScene
-            simRef={simRef}
-            gravityRef={gravityRef}
-            virtualRef={virtualRef}
-            sandColor={settings.sandColor}
-            sensorOk={sensorOk}
-          />
+          <View style={StyleSheet.absoluteFill} {...panResponder.panHandlers}>
+            <HourglassScene
+              simRef={simRef}
+              gravityRef={gravityRef}
+              virtualRef={virtualRef}
+              sandColor={settings.sandColor}
+              sensorOk={sensorOk}
+            />
+          </View>
           <SafeAreaView style={styles.overlay} pointerEvents="box-none">
             <View style={styles.topRow}>
               <View>

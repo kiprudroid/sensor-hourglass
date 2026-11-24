@@ -48,18 +48,16 @@ export function createHeightfield(size = 32): HeightfieldSim {
   };
 }
 
-export function fillUpper(hf: HeightfieldSim, amount: number): void {
+export function fillUpper(hf: HeightfieldSim, _amount: number): void {
   const n = hf.size * hf.size;
-  let cells = 0;
-  for (let i = 0; i < n; i += 1) if (hf.mask[i]) cells += 1;
-  const per = amount / Math.max(1, cells);
   hf.upper.fill(0);
   hf.lower.fill(0);
   hf.velXU.fill(0);
   hf.velZU.fill(0);
   hf.velXL.fill(0);
   hf.velZL.fill(0);
-  for (let i = 0; i < n; i += 1) if (hf.mask[i]) hf.upper[i] = per;
+  // 0.72 = ~72% full upper bulb - visibly full, leaves room for slosh.
+  for (let i = 0; i < n; i += 1) if (hf.mask[i]) hf.upper[i] = 0.72;
 }
 
 function stepBulb(
@@ -73,10 +71,11 @@ function stepBulb(
 ): void {
   const gMag = Math.sqrt(gravity.x * gravity.x + gravity.y * gravity.y + gravity.z * gravity.z) || G0;
   // Horizontal slosh from projected gravity (device frame x,z).
-  const sloshX = gravity.x * 2.2;
-  const sloshZ = gravity.z * 2.2;
-  const damp = Math.exp(-3.5 * dt);
-  const spring = 28 * Math.max(0.3, gMag / G0);
+  // Strong response so tilting is immediately visible.
+  const sloshX = gravity.x * 4.5;
+  const sloshZ = gravity.z * 4.5;
+  const damp = Math.exp(-2.8 * dt);
+  const spring = 35 * Math.max(0.3, gMag / G0);
 
   for (let z = 0; z < size; z += 1) {
     for (let x = 0; x < size; x += 1) {
@@ -100,12 +99,12 @@ function stepBulb(
       if (!mask[i]) continue;
       const hv = h[i];
       if (hv <= 0) continue;
-      const vx = velX[i] * dt * 4;
-      const vz = velZ[i] * dt * 4;
+      const vx = velX[i] * dt * 5.5;
+      const vz = velZ[i] * dt * 5.5;
       let moved = 0;
       const move = (ni: number, f: number) => {
         if (ni < 0 || ni >= h.length || !mask[ni] || f <= 0) return;
-        const a = Math.min(hv * f, hv - moved, hv * 0.45);
+        const a = Math.min(hv * f, hv - moved, hv * 0.5);
         if (a <= 0) return;
         out[i] -= a;
         out[ni] += a;
